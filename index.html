@@ -1,12 +1,1482 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-  <meta charset="UTF-8">
-  <title>Ray-Cast Shadows — Dynamic Light</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ray-Cast Shadows v2 — Multi-Light · God Rays · Global Illumination</title>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%;
+    overflow: hidden;
+    background: #000;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'SF Pro Display', sans-serif;
+    cursor: none;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  #canvas {
+    display: block;
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+  }
+
+  /* ---------- HUD ---------- */
+  .hud {
+    position: fixed;
+    pointer-events: none;
+    z-index: 10;
+    color: rgba(255, 255, 255, 0.92);
+    text-shadow: 0 2px 14px rgba(0, 0, 0, 0.9), 0 0 2px rgba(0, 0, 0, 0.6);
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  #hud-top { top: 32px; left: 36px; }
+  #title {
+    font-size: 10px; font-weight: 700;
+    letter-spacing: 6px; opacity: 0.45;
+    margin-bottom: 8px;
+  }
+  #palette-name {
+    font-size: 38px; font-weight: 200;
+    letter-spacing: 0.5px; line-height: 1;
+    transition: transform 0.45s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.4s;
+    transform-origin: left center;
+  }
+  #palette-name.pulse { transform: scale(1.12); }
+  #palette-index {
+    font-size: 10px; font-weight: 500;
+    opacity: 0.4; letter-spacing: 4px;
+    margin-top: 8px;
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  }
+  #hud-bottom {
+    bottom: 24px; left: 36px; right: 36px;
+    display: flex; justify-content: space-between;
+    align-items: flex-end; flex-wrap: wrap; gap: 16px;
+  }
+  .control-group {
+    display: flex; gap: 18px;
+    align-items: center;
+    font-size: 11px; letter-spacing: 1.4px;
+    opacity: 0.42; font-weight: 500;
+  }
+  .control-item { display: flex; align-items: center; gap: 7px; }
+  .key {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    padding: 3px 8px; border-radius: 4px;
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+    font-size: 10px; letter-spacing: 0;
+    font-weight: 600; opacity: 0.85;
+  }
+  #fps {
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+    font-size: 10px; opacity: 0.35;
+    letter-spacing: 2px;
+    position: fixed; top: 32px; right: 36px;
+    z-index: 10; pointer-events: none;
+    user-select: none;
+  }
+  #lights-indicator {
+    position: fixed; top: 56px; right: 36px;
+    z-index: 10; pointer-events: none;
+    user-select: none;
+    display: flex; gap: 6px;
+  }
+  .light-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: rgba(255, 255, 255, 0.15);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    transition: background 0.3s, box-shadow 0.3s, transform 0.3s;
+  }
+  .light-dot.on {
+    background: rgba(255, 240, 200, 0.95);
+    box-shadow: 0 0 12px rgba(255, 240, 200, 0.7);
+    transform: scale(1.15);
+  }
+  .light-dot.spot { background: rgba(200, 220, 255, 0.95); box-shadow: 0 0 12px rgba(200, 220, 255, 0.7); }
+  .light-dot.dir  { background: rgba(220, 255, 220, 0.95); box-shadow: 0 0 12px rgba(220, 255, 220, 0.7); }
+
+  /* ---------- Settings Panel ---------- */
+  #settings {
+    position: fixed; top: 50%; right: 24px;
+    transform: translateY(-50%);
+    width: 300px; max-height: 80vh;
+    background: rgba(14, 14, 22, 0.78);
+    backdrop-filter: blur(20px) saturate(140%);
+    -webkit-backdrop-filter: blur(20px) saturate(140%);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    border-radius: 14px;
+    color: rgba(255, 255, 255, 0.88);
+    font-size: 12px;
+    letter-spacing: 0.3px;
+    z-index: 20;
+    display: none;
+    overflow-y: auto;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    user-select: none;
+  }
+  #settings.open { display: block; }
+  #settings::-webkit-scrollbar { width: 6px; }
+  #settings::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 3px; }
+
+  .settings-header {
+    padding: 14px 18px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .settings-header h2 {
+    font-size: 11px; font-weight: 700;
+    letter-spacing: 3px; opacity: 0.7;
+    text-transform: uppercase;
+  }
+  .settings-header .close {
+    background: none; border: none;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 18px; cursor: pointer;
+    padding: 0; line-height: 1;
+  }
+  .settings-header .close:hover { color: rgba(255, 255, 255, 0.9); }
+
+  .settings-group {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  }
+  .settings-group summary {
+    padding: 12px 18px;
+    font-size: 10px; font-weight: 700;
+    letter-spacing: 2px; opacity: 0.65;
+    text-transform: uppercase;
+    cursor: pointer;
+    list-style: none;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .settings-group summary::-webkit-details-marker { display: none; }
+  .settings-group summary::after {
+    content: '+'; opacity: 0.4; font-weight: 300;
+  }
+  .settings-group[open] summary::after { content: '−'; }
+
+  .settings-group .body { padding: 4px 18px 14px; }
+
+  .setting-row {
+    display: flex; justify-content: space-between;
+    align-items: center;
+    padding: 7px 0;
+    gap: 12px;
+  }
+  .setting-label {
+    font-size: 12px; opacity: 0.85;
+  }
+  .setting-control {
+    display: flex; align-items: center; gap: 6px;
+  }
+
+  /* Toggle */
+  .toggle {
+    position: relative;
+    width: 32px; height: 18px;
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 9px;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  .toggle::after {
+    content: '';
+    position: absolute; top: 2px; left: 2px;
+    width: 14px; height: 14px;
+    background: rgba(255, 255, 255, 0.8);
+    border-radius: 50%;
+    transition: left 0.2s, background 0.2s;
+  }
+  .toggle.on { background: rgba(255, 200, 100, 0.6); }
+  .toggle.on::after { left: 16px; background: #fff; }
+
+  /* Range slider */
+  input[type="range"] {
+    -webkit-appearance: none; appearance: none;
+    width: 80px; height: 4px;
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 2px;
+    outline: none;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 12px; height: 12px;
+    background: #fff; border-radius: 50%;
+    cursor: pointer;
+  }
+  input[type="range"]::-moz-range-thumb {
+    width: 12px; height: 12px;
+    background: #fff; border-radius: 50%;
+    border: none; cursor: pointer;
+  }
+  .value-badge {
+    min-width: 32px; text-align: right;
+    font-family: ui-monospace, monospace;
+    font-size: 10px; opacity: 0.6;
+  }
+
+  /* Palette grid */
+  .palette-grid {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    gap: 6px; padding: 4px 0;
+  }
+  .palette-swatch {
+    height: 28px; border-radius: 4px;
+    cursor: pointer; position: relative;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    transition: transform 0.15s, border-color 0.15s;
+  }
+  .palette-swatch:hover { transform: scale(1.08); border-color: rgba(255, 255, 255, 0.4); }
+  .palette-swatch.active { border-color: #fff; transform: scale(1.05); }
+  .palette-swatch::after {
+    content: attr(data-num);
+    position: absolute; bottom: 1px; right: 3px;
+    font-size: 8px; opacity: 0.5;
+    color: #fff; text-shadow: 0 0 2px #000;
+  }
+
+  .settings-footer {
+    padding: 12px 18px;
+    font-size: 9px; opacity: 0.4;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+</style>
 </head>
 <body>
-  <!-- TODO: implement via OpenCode + MiniMax-M3 -->
-  <!-- Ray Casting + 글로벌 일루미네이션 + 클릭 색상 변경 -->
-  <canvas id="canvas"></canvas>
+<canvas id="canvas"></canvas>
+
+<div id="hud-top" class="hud">
+  <div id="title">RAY-CAST SHADOWS · v2</div>
+  <div id="palette-name">Sunset</div>
+  <div id="palette-index">PALETTE 01 / 12</div>
+</div>
+
+<div id="fps">— FPS</div>
+<div id="lights-indicator">
+  <div class="light-dot on" data-i="0"></div>
+  <div class="light-dot" data-i="1"></div>
+  <div class="light-dot" data-i="2"></div>
+</div>
+
+<div id="hud-bottom" class="hud">
+  <div class="control-group">
+    <div class="control-item"><span class="key">MOVE</span> light</div>
+    <div class="control-item"><span class="key">CLICK</span> next color</div>
+    <div class="control-item"><span class="key">L</span> add light</div>
+  </div>
+  <div class="control-group">
+    <div class="control-item"><span class="key">G</span> god rays</div>
+    <div class="control-item"><span class="key">B</span> particles</div>
+    <div class="control-item"><span class="key">M</span> multi-bounce</div>
+    <div class="control-item"><span class="key">S</span> settings</div>
+    <div class="control-item"><span class="key">R</span> reroll</div>
+  </div>
+</div>
+
+<aside id="settings">
+  <div class="settings-header">
+    <h2>Settings</h2>
+    <button class="close" id="settings-close" aria-label="Close">×</button>
+  </div>
+
+  <details class="settings-group" open>
+    <summary>Lights</summary>
+    <div class="body">
+      <div class="setting-row">
+        <span class="setting-label">Light 1 (mouse)</span>
+        <div class="setting-control">
+          <select id="light-1-type" style="background:rgba(255,255,255,0.08);color:#fff;border:1px solid rgba(255,255,255,0.15);border-radius:4px;padding:2px 6px;font-size:11px;cursor:pointer;">
+            <option value="point">point</option>
+            <option value="spot">spot</option>
+            <option value="directional">directional</option>
+          </select>
+        </div>
+      </div>
+      <div class="setting-row">
+        <span class="setting-label">Light 2 (top-right)</span>
+        <div class="setting-control">
+          <div class="toggle" id="light-2-on"></div>
+        </div>
+      </div>
+      <div class="setting-row">
+        <span class="setting-label">Light 3 (bottom-left)</span>
+        <div class="setting-control">
+          <div class="toggle" id="light-3-on"></div>
+        </div>
+      </div>
+    </div>
+  </details>
+
+  <details class="settings-group" open>
+    <summary>Effects</summary>
+    <div class="body">
+      <div class="setting-row">
+        <span class="setting-label">God rays</span>
+        <div class="setting-control">
+          <div class="toggle on" id="fx-godrays"></div>
+        </div>
+      </div>
+      <div class="setting-row">
+        <span class="setting-label">Particles</span>
+        <div class="setting-control">
+          <div class="toggle on" id="fx-particles"></div>
+        </div>
+      </div>
+      <div class="setting-row">
+        <span class="setting-label">Multi-bounce GI</span>
+        <div class="setting-control">
+          <div class="toggle" id="fx-multibounce"></div>
+        </div>
+      </div>
+      <div class="setting-row">
+        <span class="setting-label">Color bleeding</span>
+        <div class="setting-control">
+          <div class="toggle on" id="fx-colorbleed"></div>
+        </div>
+      </div>
+      <div class="setting-row">
+        <span class="setting-label">Penumbra (soft)</span>
+        <div class="setting-control">
+          <div class="toggle on" id="fx-penumbra"></div>
+        </div>
+      </div>
+      <div class="setting-row">
+        <span class="setting-label">Specular</span>
+        <div class="setting-control">
+          <div class="toggle on" id="fx-specular"></div>
+        </div>
+      </div>
+    </div>
+  </details>
+
+  <details class="settings-group" open>
+    <summary>Quality</summary>
+    <div class="body">
+      <div class="setting-row">
+        <span class="setting-label">Penumbra blur</span>
+        <div class="setting-control">
+          <input type="range" id="q-penumbra" min="0" max="12" step="1" value="4">
+          <span class="value-badge" id="q-penumbra-v">4</span>
+        </div>
+      </div>
+      <div class="setting-row">
+        <span class="setting-label">God ray count</span>
+        <div class="setting-control">
+          <input type="range" id="q-rays" min="8" max="96" step="4" value="48">
+          <span class="value-badge" id="q-rays-v">48</span>
+        </div>
+      </div>
+      <div class="setting-row">
+        <span class="setting-label">Particles</span>
+        <div class="setting-control">
+          <input type="range" id="q-particles" min="0" max="240" step="10" value="80">
+          <span class="value-badge" id="q-particles-v">80</span>
+        </div>
+      </div>
+      <div class="setting-row">
+        <span class="setting-label">GI strength</span>
+        <div class="setting-control">
+          <input type="range" id="q-gi" min="0" max="150" step="5" value="100">
+          <span class="value-badge" id="q-gi-v">100</span>
+        </div>
+      </div>
+      <div class="setting-row">
+        <span class="setting-label">Adaptive quality</span>
+        <div class="setting-control">
+          <div class="toggle on" id="q-adaptive"></div>
+        </div>
+      </div>
+    </div>
+  </details>
+
+  <details class="settings-group" open>
+    <summary>Palette</summary>
+    <div class="body">
+      <div class="palette-grid" id="palette-grid"></div>
+    </div>
+  </details>
+
+  <div class="settings-footer">Settings saved to localStorage · Press S to toggle</div>
+</aside>
+
+<script>
+(() => {
+  'use strict';
+
+  // ============================================================
+  //  PALETTES — 12 atmospheric moods
+  // ============================================================
+  const PALETTES = [
+    { name: 'Sunset',    core:[255,232,168], mid:[255,152,100], edge:[255, 82, 72], bounce:[255,140,100], wall:[ 42, 24, 36], bg:[ 10,  6, 16] },
+    { name: 'Moonlight', core:[220,240,255], mid:[130,180,255], edge:[ 70,110,220], bounce:[140,200,255], wall:[ 16, 24, 48], bg:[  4,  6, 14] },
+    { name: 'Forest',    core:[225,255,185], mid:[130,220,110], edge:[ 50,150, 70], bounce:[160,255,130], wall:[ 22, 38, 22], bg:[  6, 10,  8] },
+    { name: 'Aurora',    core:[205,255,235], mid:[155,120,255], edge:[ 90, 50,200], bounce:[120,255,220], wall:[ 28, 18, 52], bg:[ 10,  4, 20] },
+    { name: 'Ember',     core:[255,220,110], mid:[255,110, 40], edge:[200, 40, 24], bounce:[255,140, 50], wall:[ 42, 16, 12], bg:[ 14,  6,  4] },
+    { name: 'Cosmic',    core:[255,205,255], mid:[220, 95,225], edge:[ 90, 50,190], bounce:[200,115,255], wall:[ 22, 12, 38], bg:[  8,  4, 14] },
+    { name: 'Tide',      core:[200,245,235], mid:[ 80,200,220], edge:[ 40,120,180], bounce:[100,220,230], wall:[ 14, 32, 44], bg:[  4, 10, 16] },
+    { name: 'Magma',     core:[255,245,180], mid:[255,140, 50], edge:[200, 40, 20], bounce:[255,160, 60], wall:[ 40, 16,  8], bg:[ 12,  4,  2] },
+    { name: 'Glacier',   core:[240,250,255], mid:[170,220,240], edge:[100,160,210], bounce:[180,230,250], wall:[ 22, 32, 48], bg:[  6, 10, 18] },
+    { name: 'Meadow',    core:[250,255,200], mid:[180,230, 90], edge:[100,170, 50], bounce:[200,240,120], wall:[ 30, 36, 18], bg:[  8, 12,  6] },
+    { name: 'Twilight',  core:[255,210,235], mid:[220,130,220], edge:[100, 60,180], bounce:[230,150,230], wall:[ 28, 14, 38], bg:[  8,  4, 14] },
+    { name: 'Coral',     core:[255,225,200], mid:[255,150,130], edge:[220, 90, 90], bounce:[255,170,140], wall:[ 44, 22, 26], bg:[ 14,  6,  8] }
+  ];
+
+  // ============================================================
+  //  SETTINGS (persisted in localStorage)
+  // ============================================================
+  const SETTINGS_DEFAULT = {
+    version: 2,
+    paletteId: 0,
+    lights: {
+      L1: { type: 'point', enabled: true,  intensity: 0.95 },
+      L2: { type: 'point', enabled: false, intensity: 0.65 },
+      L3: { type: 'point', enabled: false, intensity: 0.65 }
+    },
+    fx: {
+      godRays:     { enabled: true },
+      particles:   { enabled: true },
+      multiBounce: { enabled: false, passes: 1 },
+      colorBleed:  { enabled: true },
+      penumbra:    { enabled: true },
+      specular:    { enabled: true }
+    },
+    quality: {
+      penumbraBlur: 4,
+      godRays: 48,
+      particles: 80,
+      giStrength: 1.0,
+      adaptive: true
+    }
+  };
+
+  const SETTINGS_KEY = 'rcs2-settings-v2';
+  let SETTINGS = loadSettings();
+
+  function loadSettings() {
+    try {
+      const raw = localStorage.getItem(SETTINGS_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.version === 2) return mergeSettings(SETTINGS_DEFAULT, parsed);
+      }
+    } catch (e) { /* ignore */ }
+    return JSON.parse(JSON.stringify(SETTINGS_DEFAULT));
+  }
+  function mergeSettings(def, user) {
+    const out = JSON.parse(JSON.stringify(def));
+    for (const k in user) {
+      if (typeof user[k] === 'object' && !Array.isArray(user[k]) && user[k] !== null) {
+        out[k] = mergeSettings(def[k] || {}, user[k]);
+      } else {
+        out[k] = user[k];
+      }
+    }
+    return out;
+  }
+  let saveTimer = null;
+  function saveSettings() {
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(SETTINGS)); }
+      catch (e) { /* ignore quota */ }
+    }, 250);
+  }
+
+  // ============================================================
+  //  DOM
+  // ============================================================
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d', { alpha: false });
+  const paletteNameEl = document.getElementById('palette-name');
+  const paletteIndexEl = document.getElementById('palette-index');
+  const fpsEl = document.getElementById('fps');
+  const settingsEl = document.getElementById('settings');
+
+  // ============================================================
+  //  CANVAS / VIEWPORT
+  // ============================================================
+  let W = 0, H = 0, DPR = 1;
+
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = Math.floor(W * DPR);
+    canvas.height = Math.floor(H * DPR);
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    if (!walls || walls.length === 0) regenerateMaze();
+    else updateBorderWalls();
+  }
+
+  // ============================================================
+  //  PALETTE (with smooth transition)
+  // ============================================================
+  let P = JSON.parse(JSON.stringify(PALETTES[0]));  // current live palette
+  let Pfrom = JSON.parse(JSON.stringify(PALETTES[0]));
+  let Ptarget = JSON.parse(JSON.stringify(PALETTES[0]));
+  let transitionStart = 0;
+  let transitionDuration = 0;
+
+  function setPalette(idx, instant = false) {
+    idx = ((idx % PALETTES.length) + PALETTES.length) % PALETTES.length;
+    SETTINGS.paletteId = idx;
+    saveSettings();
+    if (instant) {
+      P = JSON.parse(JSON.stringify(PALETTES[idx]));
+      Pfrom = JSON.parse(JSON.stringify(PALETTES[idx]));
+      Ptarget = JSON.parse(JSON.stringify(PALETTES[idx]));
+    } else {
+      Pfrom = JSON.parse(JSON.stringify(P));
+      Ptarget = JSON.parse(JSON.stringify(PALETTES[idx]));
+      transitionStart = performance.now();
+      transitionDuration = 600;
+    }
+    paletteNameEl.textContent = PALETTES[idx].name;
+    paletteIndexEl.textContent = 'PALETTE ' + String(idx + 1).padStart(2, '0') + ' / ' + String(PALETTES.length).padStart(2, '0');
+    paletteNameEl.classList.remove('pulse');
+    void paletteNameEl.offsetWidth;
+    paletteNameEl.classList.add('pulse');
+    // Update palette swatch UI
+    document.querySelectorAll('.palette-swatch').forEach((el, i) => {
+      el.classList.toggle('active', i === idx);
+    });
+  }
+
+  function updatePaletteTransition() {
+    if (transitionDuration <= 0) return;
+    const t = Math.min(1, (performance.now() - transitionStart) / transitionDuration);
+    // cubic ease-in-out
+    const e = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+    P.core   = lerpArr(Pfrom.core,   Ptarget.core,   e);
+    P.mid    = lerpArr(Pfrom.mid,    Ptarget.mid,    e);
+    P.edge   = lerpArr(Pfrom.edge,   Ptarget.edge,   e);
+    P.bounce = lerpArr(Pfrom.bounce, Ptarget.bounce, e);
+    P.wall   = lerpArr(Pfrom.wall,   Ptarget.wall,   e);
+    P.bg     = lerpArr(Pfrom.bg,     Ptarget.bg,     e);
+    if (t >= 1) transitionDuration = 0;
+  }
+  function lerpArr(a, b, t) {
+    return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+  }
+
+  // ============================================================
+  //  LIGHTS (1-3 light sources, each with type/intensity/anchor)
+  // ============================================================
+  function makeLight(id, type, anchorMode, anchorX, anchorY, intensity) {
+    return {
+      id, type,
+      x: anchorX, y: anchorY,
+      tx: anchorX, ty: anchorY,
+      intensity, enabled: true,
+      anchor: anchorMode,  // 'mouse' | 'fixed'
+      spotAngle: 0, spotHalfRad: Math.PI / 5, spotDir: [1, 0],
+      dirVec: [0.6, -0.8],
+      smoothing: 0.28,
+      // Per-frame cache
+      polyPts: null, polyMaxR: 0
+    };
+  }
+
+  // Light 1 = mouse-controlled; L2, L3 = fixed positions
+  const lights = [
+    makeLight('L1', 'point', 'mouse', window.innerWidth * 0.5, window.innerHeight * 0.5, 0.95),
+    makeLight('L2', 'point', 'fixed', window.innerWidth * 0.78, window.innerHeight * 0.32, 0.65),
+    makeLight('L3', 'point', 'fixed', window.innerWidth * 0.22, window.innerHeight * 0.78, 0.65)
+  ];
+
+  // ============================================================
+  //  MAZE GENERATION (DFS)
+  // ============================================================
+  let walls = [];
+  let borderStart = -1;
+  let spatialGrid = null;
+
+  function regenerateMaze() {
+    const cellSize = Math.max(56, Math.min(100, Math.floor(Math.min(W, H) / 9)));
+    const cols = Math.max(6, Math.floor(W / cellSize));
+    const rows = Math.max(5, Math.floor(H / cellSize));
+    const offX = (W - cols * cellSize) / 2;
+    const offY = (H - rows * cellSize) / 2;
+
+    const grid = new Array(rows);
+    for (let r = 0; r < rows; r++) {
+      grid[r] = new Array(cols);
+      for (let c = 0; c < cols; c++) grid[r][c] = { r, c, visited: false };
+    }
+
+    const wallSet = new Set();
+    for (let r = 0; r <= rows; r++)
+      for (let c = 0; c < cols; c++) wallSet.add('H:' + c + ',' + r);
+    for (let r = 0; r < rows; r++)
+      for (let c = 0; c <= cols; c++) wallSet.add('V:' + c + ',' + r);
+
+    const stack = [grid[0][0]];
+    grid[0][0].visited = true;
+    while (stack.length > 0) {
+      const cur = stack[stack.length - 1];
+      const { r, c } = cur;
+      const candidates = [];
+      if (r > 0        && !grid[r - 1][c].visited) candidates.push(['H:' + c + ',' + r,         grid[r - 1][c]]);
+      if (c < cols - 1 && !grid[r][c + 1].visited) candidates.push(['V:' + (c + 1) + ',' + r,   grid[r][c + 1]]);
+      if (r < rows - 1 && !grid[r + 1][c].visited) candidates.push(['H:' + c + ',' + (r + 1),   grid[r + 1][c]]);
+      if (c > 0        && !grid[r][c - 1].visited) candidates.push(['V:' + c + ',' + r,         grid[r][c - 1]]);
+      if (candidates.length === 0) { stack.pop(); continue; }
+      const pick = candidates[(Math.random() * candidates.length) | 0];
+      wallSet.delete(pick[0]);
+      pick[1].visited = true;
+      stack.push(pick[1]);
+    }
+
+    const keys = Array.from(wallSet);
+    const toRemove = Math.floor(keys.length * 0.10);
+    for (let i = 0; i < toRemove; i++) {
+      const idx = (Math.random() * keys.length) | 0;
+      wallSet.delete(keys[idx]); keys.splice(idx, 1);
+    }
+
+    walls = [];
+    for (const key of wallSet) {
+      const colon = key.indexOf(':');
+      const comma = key.indexOf(',');
+      const type = key[0];
+      const col = +key.substring(colon + 1, comma);
+      const row = +key.substring(comma + 1);
+      if (type === 'H') {
+        walls.push({ x1: offX + col * cellSize, y1: offY + row * cellSize,
+                     x2: offX + (col + 1) * cellSize, y2: offY + row * cellSize });
+      } else {
+        walls.push({ x1: offX + col * cellSize, y1: offY + row * cellSize,
+                     x2: offX + col * cellSize, y2: offY + (row + 1) * cellSize });
+      }
+    }
+    addBorderWalls();
+    buildSpatialGrid();
+    // Re-snap fixed lights if they were outside new bounds
+    lights[1].tx = Math.min(W * 0.78, W - 100); lights[1].ty = H * 0.32;
+    lights[1].x = lights[1].tx; lights[1].y = lights[1].ty;
+    lights[2].tx = W * 0.22; lights[2].ty = Math.min(H * 0.78, H - 100);
+    lights[2].x = lights[2].tx; lights[2].y = lights[2].ty;
+  }
+
+  function addBorderWalls() {
+    borderStart = walls.length;
+    walls.push(
+      { x1: -20, y1: -20,    x2: W + 20, y2: -20    },
+      { x1: -20, y1: H + 20, x2: W + 20, y2: H + 20 },
+      { x1: -20, y1: -20,    x2: -20,    y2: H + 20 },
+      { x1: W + 20, y1: -20, x2: W + 20, y2: H + 20 }
+    );
+  }
+  function updateBorderWalls() {
+    if (borderStart < 0) return;
+    walls[borderStart    ] = { x1: -20, y1: -20,    x2: W + 20, y2: -20    };
+    walls[borderStart + 1] = { x1: -20, y1: H + 20, x2: W + 20, y2: H + 20 };
+    walls[borderStart + 2] = { x1: -20, y1: -20,    x2: -20,    y2: H + 20 };
+    walls[borderStart + 3] = { x1: W + 20, y1: -20, x2: W + 20, y2: H + 20 };
+    buildSpatialGrid();
+  }
+
+  // ============================================================
+  //  SPATIAL GRID (perf: prune walls per ray)
+  // ============================================================
+  function buildSpatialGrid() {
+    if (walls.length === 0) { spatialGrid = null; return; }
+    const cellSize = 180;
+    const cols = Math.ceil((W + 40) / cellSize);
+    const rows = Math.ceil((H + 40) / cellSize);
+    const grid = new Array(rows * cols);
+    for (let i = 0; i < grid.length; i++) grid[i] = [];
+    for (let i = 0; i < walls.length; i++) {
+      const w = walls[i];
+      const x0 = Math.max(0, Math.floor((Math.min(w.x1, w.x2) - 0) / cellSize));
+      const x1 = Math.min(cols - 1, Math.floor((Math.max(w.x1, w.x2)) / cellSize));
+      const y0 = Math.max(0, Math.floor((Math.min(w.y1, w.y2) - 0) / cellSize));
+      const y1 = Math.min(rows - 1, Math.floor((Math.max(w.y1, w.y2)) / cellSize));
+      for (let cy = y0; cy <= y1; cy++)
+        for (let cx = x0; cx <= x1; cx++)
+          grid[cy * cols + cx].push(i);
+    }
+    spatialGrid = { cellSize, cols, rows, grid };
+  }
+
+  // Returns wall indices that COULD intersect a ray from (ox,oy) in direction (dx,dy)
+  // to max distance. We step along the ray in cell-sized hops and collect cell contents.
+  function queryWalls(ox, oy, dx, dy, maxDist) {
+    if (!spatialGrid) return walls;
+    const { cellSize, cols, rows, grid } = spatialGrid;
+    const result = [];
+    const seen = new Set();
+    const stepLen = cellSize;
+    const numSteps = Math.ceil(maxDist / stepLen) + 1;
+    let cx = Math.floor(ox / cellSize);
+    let cy = Math.floor(oy / cellSize);
+    for (let s = 0; s < numSteps; s++) {
+      if (cx < 0 || cx >= cols || cy < 0 || cy >= rows) break;
+      const cell = grid[cy * cols + cx];
+      for (let i = 0; i < cell.length; i++) {
+        const wi = cell[i];
+        if (!seen.has(wi)) { seen.add(wi); result.push(wi); }
+      }
+      cx += dx > 0.4 ? 1 : (dx < -0.4 ? -1 : 0);
+      cy += dy > 0.4 ? 1 : (dy < -0.4 ? -1 : 0);
+      // step forward along ray
+      const px = ox + dx * (s + 1) * stepLen;
+      const py = oy + dy * (s + 1) * stepLen;
+      cx = Math.floor(px / cellSize);
+      cy = Math.floor(py / cellSize);
+    }
+    return result.length === 0 ? walls : result.map(i => walls[i]);
+  }
+
+  // ============================================================
+  //  RAY CASTING (with optional penumbra)
+  // ============================================================
+  const EPSILON = 0.00012;
+  const MAX_DIST = 2400;
+
+  function castSingleRay(ox, oy, angle, maxDist) {
+    if (maxDist == null) maxDist = MAX_DIST;
+    const dx = Math.cos(angle);
+    const dy = Math.sin(angle);
+    const farX = ox + dx * maxDist;
+    const farY = oy + dy * maxDist;
+
+    const candidates = queryWalls(ox, oy, dx, dy, maxDist);
+    let minT = Infinity;
+    let hx = farX, hy = farY;
+    for (let i = 0; i < candidates.length; i++) {
+      const w = candidates[i];
+      const x1 = w.x1, y1 = w.y1, x2 = w.x2, y2 = w.y2;
+      const denom = (ox - farX) * (y1 - y2) - (oy - farY) * (x1 - x2);
+      if (denom > -1e-10 && denom < 1e-10) continue;
+      const t = ((ox - x1) * (y1 - y2) - (oy - y1) * (x1 - x2)) / denom;
+      const u = -((ox - farX) * (oy - y1) - (oy - farY) * (ox - x1)) / denom;
+      if (t > 0 && u >= 0 && u <= 1 && t < minT) {
+        minT = t; hx = ox + t * (farX - ox); hy = oy + t * (farY - oy);
+      }
+    }
+    return { x: hx, y: hy, t: minT === Infinity ? 1 : minT };
+  }
+
+  // Casts rays to every wall corner (with ε offsets) and returns sorted polygon points
+  function castAllRays(ox, oy, light) {
+    // For directional: far points are based on the direction, not from light
+    // For spot: filter angles to cone
+    let angleFilter = null;
+    if (light && light.type === 'spot') {
+      angleFilter = (a) => {
+        const da = ((a - light.spotAngle + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+        return Math.abs(da) <= light.spotHalfRad;
+      };
+    }
+
+    const angles = [];
+    for (let i = 0; i < walls.length; i++) {
+      const w = walls[i];
+      const a1 = Math.atan2(w.y1 - oy, w.x1 - ox);
+      const a2 = Math.atan2(w.y2 - oy, w.x2 - ox);
+      if (!angleFilter || angleFilter(a1)) {
+        angles.push(a1 - EPSILON, a1, a1 + EPSILON);
+      }
+      if (!angleFilter || angleFilter(a2)) {
+        angles.push(a2 - EPSILON, a2, a2 + EPSILON);
+      }
+    }
+
+    if (angles.length === 0) return [];
+
+    angles.sort((a, b) => a - b);
+
+    // Penumbra: jitter each angle with N samples, average the hit
+    const penumbra = SETTINGS.fx.penumbra.enabled && SETTINGS.quality.penumbraBlur > 0;
+    const samples = penumbra ? 3 : 1;
+    const spread = 0.0035 * SETTINGS.quality.penumbraBlur;
+
+    const pts = new Array(angles.length);
+    for (let i = 0; i < angles.length; i++) {
+      if (samples === 1) {
+        pts[i] = castSingleRay(ox, oy, angles[i]);
+      } else {
+        let sx = 0, sy = 0;
+        for (let s = 0; s < samples; s++) {
+          const j = (s - (samples - 1) / 2) * spread;
+          const r = castSingleRay(ox, oy, angles[i] + j);
+          sx += r.x; sy += r.y;
+        }
+        pts[i] = { x: sx / samples, y: sy / samples };
+      }
+    }
+    return pts;
+  }
+
+  // ============================================================
+  //  PARTICLES
+  // ============================================================
+  const particles = [];
+  function initParticles() {
+    particles.length = 0;
+    for (let i = 0; i < 300; i++) {
+      particles.push(makeParticle());
+    }
+  }
+  function makeParticle() {
+    const light = activeLights()[(Math.random() * activeLights().length) | 0] || lights[0];
+    const ang = Math.random() * Math.PI * 2;
+    const dist = Math.random() * 300;
+    return {
+      x: light.x + Math.cos(ang) * dist,
+      y: light.y + Math.sin(ang) * dist,
+      vx: (Math.random() - 0.5) * 0.25,
+      vy: (Math.random() - 0.5) * 0.25,
+      life: Math.random() * 8,
+      maxLife: 6 + Math.random() * 6,
+      size: 0.6 + Math.random() * 1.8,
+      drift: 0.3 + Math.random() * 0.4
+    };
+  }
+  function activeLights() { return lights.filter(l => l.enabled); }
+
+  function updateParticles(dt) {
+    const t = performance.now() * 0.0003;
+    for (let i = 0; i < particles.length; i++) {
+      const p = particles[i];
+      p.vx += Math.sin(p.x * 0.01 + t) * 0.005;
+      p.vy += Math.cos(p.y * 0.01 + t) * 0.005;
+      p.vx *= 0.985; p.vy *= 0.985;
+      p.x += p.vx; p.y += p.vy;
+      p.life += dt;
+      // Respawn if dead or far from any light
+      let nearLight = false;
+      for (let li = 0; li < lights.length; li++) {
+        if (!lights[li].enabled) continue;
+        const dx = p.x - lights[li].x, dy = p.y - lights[li].y;
+        if (dx * dx + dy * dy < 500 * 500) { nearLight = true; break; }
+      }
+      if (p.life > p.maxLife || !nearLight) {
+        const np = makeParticle();
+        Object.assign(p, np);
+      }
+    }
+  }
+
+  function renderParticles() {
+    if (!SETTINGS.fx.particles.enabled) return;
+    const count = SETTINGS.quality.particles;
+    if (count === 0) return;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < count && i < particles.length; i++) {
+      const p = particles[i];
+      // Compute glow from any active light (cheap: 3 lights max)
+      let glow = 0;
+      for (let li = 0; li < lights.length; li++) {
+        const L = lights[li];
+        if (!L.enabled) continue;
+        const dx = p.x - L.x, dy = p.y - L.y;
+        const d2 = dx * dx + dy * dy;
+        if (d2 < 250 * 250) {
+          const angle = Math.atan2(dy, dx);
+          // Cache raycast check: only if angle is "covered" by light
+          const hit = castSingleRay(L.x, L.y, angle, Math.sqrt(d2) + 5);
+          const ddx = p.x - hit.x, ddy = p.y - hit.y;
+          if (ddx * ddx + ddy * ddy < 25) {
+            const d = Math.sqrt(d2);
+            glow += Math.max(0, 1 - d / 300) * L.intensity;
+          }
+        }
+      }
+      if (glow < 0.02) continue;
+      const a = Math.min(0.85, (p.life / p.maxLife) * 1.1 * glow);
+      const r = p.size * 6; // larger glow radius
+      const c = P.core;
+      const grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
+      grad.addColorStop(0,    'rgba(' + c[0] + ',' + c[1] + ',' + c[2] + ',' + a + ')');
+      grad.addColorStop(0.4,  'rgba(' + P.mid[0] + ',' + P.mid[1] + ',' + P.mid[2] + ',' + (a * 0.5) + ')');
+      grad.addColorStop(1,    'rgba(' + P.mid[0] + ',' + P.mid[1] + ',' + P.mid[2] + ',0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  // ============================================================
+  //  COLOR UTILITIES
+  // ============================================================
+  function rgba(c, a) { return 'rgba(' + c[0] + ',' + c[1] + ',' + c[2] + ',' + a + ')'; }
+
+  // ============================================================
+  //  MULTI-BOUNCE GI (1-pass: secondary illumination on walls)
+  // ============================================================
+  function renderMultiBounce(L, litWalls) {
+    if (!SETTINGS.fx.multiBounce.enabled) return;
+    // For each lit wall midpoint, treat it as a secondary source
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < litWalls.length; i++) {
+      const w = walls[litWalls[i]];
+      const mx = (w.x1 + w.x2) * 0.5;
+      const my = (w.y1 + w.y2) * 0.5;
+      // For each OTHER wall, check if THIS bounce light can reach it
+      for (let j = 0; j < walls.length; j++) {
+        if (j === litWalls[i]) continue;
+        const w2 = walls[j];
+        const mx2 = (w2.x1 + w.x2) * 0.5;
+        const my2 = (w2.y1 + w2.y2) * 0.5;
+        const angle = Math.atan2(my2 - my, mx2 - mx);
+        const hit = castSingleRay(mx, my, angle, 350);
+        const ddx = mx2 - hit.x, ddy = my2 - hit.y;
+        if (ddx * ddx + ddy * ddy < 200) {
+          const d = Math.sqrt((mx2 - mx) ** 2 + (my2 - my) ** 2);
+          // Much stronger intensity + larger radius for visible secondary illumination
+          const intensity = Math.max(0.04, 0.35 - d / 800) * 0.55;
+          if (intensity < 0.04) continue;
+          const bR = 70;
+          const c = SETTINGS.fx.colorBleed.enabled ? blendColor(P.bounce, P.wall, 0.3) : P.bounce;
+          const grad = ctx.createRadialGradient(mx2, my2, 0, mx2, my2, bR);
+          grad.addColorStop(0,    rgba(c, intensity));
+          grad.addColorStop(0.5,  rgba(c, intensity * 0.4));
+          grad.addColorStop(1,    rgba(c, 0));
+          ctx.fillStyle = grad;
+          ctx.fillRect(mx2 - bR, my2 - bR, bR * 2, bR * 2);
+        }
+      }
+    }
+    ctx.restore();
+  }
+
+  function blendColor(a, b, t) {
+    return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+  }
+
+  // ============================================================
+  //  RENDER — full pipeline
+  // ============================================================
+  let lastTime = performance.now();
+  let fpsAccum = 0, fpsFrames = 0, fpsValue = 60;
+  let fpsHistory = [];
+  const FPS_HISTORY_MAX = 60;
+
+  function render(now) {
+    const dt = Math.min(50, now - lastTime);
+    lastTime = now;
+    fpsAccum += dt; fpsFrames++;
+    if (fpsAccum > 500) {
+      fpsValue = Math.round(1000 / (fpsAccum / fpsFrames));
+      fpsAccum = 0; fpsFrames = 0;
+      fpsEl.textContent = fpsValue + ' FPS';
+      fpsHistory.push(fpsValue);
+      if (fpsHistory.length > FPS_HISTORY_MAX) fpsHistory.shift();
+    }
+
+    // Smooth light tracking
+    for (let i = 0; i < lights.length; i++) {
+      const L = lights[i];
+      L.x += (L.tx - L.x) * L.smoothing;
+      L.y += (L.ty - L.y) * L.smoothing;
+    }
+
+    // Palette transition
+    updatePaletteTransition();
+
+    // Update particles
+    if (SETTINGS.fx.particles.enabled) updateParticles(dt);
+
+    // ---- 1. Background ----
+    const bg = P.bg;
+    ctx.fillStyle = 'rgb(' + (bg[0] | 0) + ',' + (bg[1] | 0) + ',' + (bg[2] | 0) + ')';
+    ctx.fillRect(0, 0, W, H);
+
+    // ---- 2. Ambient radial (very subtle) ----
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const ambient = ctx.createRadialGradient(W * 0.5, H * 0.5, 0, W * 0.5, H * 0.5, Math.max(W, H) * 0.75);
+    ambient.addColorStop(0, rgba(P.edge, 0.05));
+    ambient.addColorStop(1, rgba(P.edge, 0));
+    ctx.fillStyle = ambient;
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+
+    // ---- 3. Walls ----
+    ctx.strokeStyle = rgba(P.wall, 0.85);
+    ctx.lineWidth = 3.2;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    for (let i = 0; i < walls.length; i++) {
+      const w = walls[i];
+      ctx.beginPath();
+      ctx.moveTo(w.x1, w.y1);
+      ctx.lineTo(w.x2, w.y2);
+      ctx.stroke();
+    }
+
+    // ---- 4. Per-light passes ----
+    for (let li = 0; li < lights.length; li++) {
+      const L = lights[li];
+      if (!L.enabled) continue;
+      renderLight(L);
+    }
+
+    // ---- 5. Particles ----
+    renderParticles();
+
+    // ---- 6. Vignette ----
+    const vignette = ctx.createRadialGradient(W * 0.5, H * 0.5, Math.min(W, H) * 0.45, W * 0.5, H * 0.5, Math.max(W, H) * 0.78);
+    vignette.addColorStop(0, 'rgba(0, 0, 0, 0)');
+    vignette.addColorStop(1, 'rgba(0, 0, 0, 0.45)');
+    ctx.fillStyle = vignette;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  function renderLight(L) {
+    // For directional lights, treat as point light with very long rays from a virtual center
+    let pts;
+    if (L.type === 'directional') {
+      // Synthesize point at a far position for ray casting
+      const vx = -L.dirVec[0] * 1800;
+      const vy = -L.dirVec[1] * 1800;
+      const synth = { x: L.x + vx, y: L.y + vy, type: 'point' };
+      pts = castAllRays(L.x, L.y, synth);
+    } else {
+      pts = castAllRays(L.x, L.y, L);
+    }
+    if (pts.length === 0) return;
+
+    // Find max radius
+    let maxD2 = 0;
+    for (let i = 0; i < pts.length; i++) {
+      const dx = pts[i].x - L.x, dy = pts[i].y - L.y;
+      const d2 = dx * dx + dy * dy;
+      if (d2 > maxD2) maxD2 = d2;
+    }
+    const maxR = Math.sqrt(maxD2);
+    const intensity = L.intensity;
+
+    // 4a. Soft edge halos around polygon (multi-stroke)
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    const halos = [
+      { width: 30, alpha: 0.10 * intensity, color: P.edge },
+      { width: 18, alpha: 0.18 * intensity, color: P.mid  },
+      { width: 9,  alpha: 0.32 * intensity, color: P.mid  },
+      { width: 4,  alpha: 0.55 * intensity, color: P.core }
+    ];
+    for (const h of halos) {
+      ctx.strokeStyle = rgba(h.color, h.alpha);
+      ctx.lineWidth = h.width;
+      ctx.beginPath();
+      ctx.moveTo(L.x, L.y);
+      for (let i = 0; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+      ctx.closePath();
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // 4b. Clipped polygon fill with radial gradient (the lit interior)
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(L.x, L.y);
+    for (let i = 0; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.closePath();
+    ctx.clip();
+
+    ctx.globalCompositeOperation = 'lighter';
+    const inner = ctx.createRadialGradient(L.x, L.y, 0, L.x, L.y, maxR);
+    const giMul = SETTINGS.quality.giStrength;
+    inner.addColorStop(0,    rgba(P.core, 0.68 * intensity * giMul));
+    inner.addColorStop(0.30, rgba(P.mid,  0.52 * intensity * giMul));
+    inner.addColorStop(0.70, rgba(P.edge, 0.30 * intensity * giMul));
+    inner.addColorStop(1,    rgba(P.edge, 0.08 * intensity * giMul));
+    ctx.fillStyle = inner;
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+
+    // 4c. GI spillover (large radial extending beyond polygon)
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const giR = Math.max(W, H) * 0.95;
+    const gi = ctx.createRadialGradient(L.x, L.y, 0, L.x, L.y, giR);
+    gi.addColorStop(0,    rgba(P.mid,  0.32 * intensity * giMul));
+    gi.addColorStop(0.10, rgba(P.mid,  0.24 * intensity * giMul));
+    gi.addColorStop(0.22, rgba(P.edge, 0.14 * intensity * giMul));
+    gi.addColorStop(0.40, rgba(P.edge, 0.06 * intensity * giMul));
+    gi.addColorStop(0.70, rgba(P.edge, 0.02 * intensity * giMul));
+    gi.addColorStop(1,    rgba(P.edge, 0));
+    ctx.fillStyle = gi;
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+
+    // 4d. Bounce lights on visible wall midpoints (1st-bounce GI)
+    const litWalls = [];
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < walls.length; i++) {
+      const w = walls[i];
+      const mx = (w.x1 + w.x2) * 0.5;
+      const my = (w.y1 + w.y2) * 0.5;
+      const ang = Math.atan2(my - L.y, mx - L.x);
+      const hit = castSingleRay(L.x, L.y, ang, 1500);
+      const ddx = mx - hit.x, ddy = my - hit.y;
+      if (ddx * ddx + ddy * ddy < 196) {
+        litWalls.push(i);
+        const d = Math.sqrt((mx - L.x) ** 2 + (my - L.y) ** 2);
+        const bIntensity = Math.max(0.10, 0.85 * intensity - d / 900);
+        const bR = 110;
+        // Color: bounce palette, with color bleeding if enabled
+        const bColor = SETTINGS.fx.colorBleed.enabled
+          ? blendColor(P.bounce, P.wall, 0.25)
+          : P.bounce;
+        const bg2 = ctx.createRadialGradient(mx, my, 0, mx, my, bR);
+        bg2.addColorStop(0,    rgba(bColor, bIntensity));
+        bg2.addColorStop(0.35, rgba(bColor, bIntensity * 0.55));
+        bg2.addColorStop(0.7,  rgba(bColor, bIntensity * 0.18));
+        bg2.addColorStop(1,    rgba(bColor, 0));
+        ctx.fillStyle = bg2;
+        ctx.fillRect(mx - bR, my - bR, bR * 2, bR * 2);
+      }
+    }
+    ctx.restore();
+
+    // 4e. Specular highlights on visible walls
+    if (SETTINGS.fx.specular.enabled) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      const shininess = 24;
+      for (let i = 0; i < litWalls.length; i++) {
+        const w = walls[litWalls[i]];
+        // Wall direction → normal (perpendicular, 2D)
+        const wdx = w.x2 - w.x1, wdy = w.y2 - w.y1;
+        const wlen = Math.sqrt(wdx * wdx + wdy * wdy);
+        if (wlen < 0.1) continue;
+        let nx = -wdy / wlen, ny = wdx / wlen;
+        const mx = (w.x1 + w.x2) * 0.5;
+        const my = (w.y1 + w.y2) * 0.5;
+        // Light direction from wall midpoint
+        const ldx = L.x - mx, ldy = L.y - my;
+        const llen = Math.sqrt(ldx * ldx + ldy * ldy);
+        if (llen < 0.1) continue;
+        const lnx = ldx / llen, lny = ldy / llen;
+        // Try both normal orientations
+        let dot = nx * lnx + ny * lny;
+        if (dot < 0) { nx = -nx; ny = -ny; dot = -dot; }
+        if (dot > 0.94) {
+          const spec = Math.pow(dot, shininess) * intensity * 0.6;
+          if (spec > 0.05) {
+            const sR = 22;
+            const sgrad = ctx.createRadialGradient(mx, my, 0, mx, my, sR);
+            sgrad.addColorStop(0, rgba([255, 250, 240], spec));
+            sgrad.addColorStop(1, rgba([255, 250, 240], 0));
+            ctx.fillStyle = sgrad;
+            ctx.fillRect(mx - sR, my - sR, sR * 2, sR * 2);
+          }
+        }
+      }
+      ctx.restore();
+    }
+
+    // 4f. Multi-bounce secondary illumination
+    renderMultiBounce(L, litWalls);
+
+    // 4g. God rays (volumetric light shafts)
+    if (SETTINGS.fx.godRays.enabled) {
+      renderGodRays(L, pts, maxR);
+    }
+
+    // 4h. Light source core
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const coreR = 55;
+    const core = ctx.createRadialGradient(L.x, L.y, 0, L.x, L.y, coreR);
+    core.addColorStop(0,    'rgba(255, 255, 255, ' + (0.95 * intensity) + ')');
+    core.addColorStop(0.18, rgba(P.core, 0.85 * intensity));
+    core.addColorStop(0.55, rgba(P.mid,  0.40 * intensity));
+    core.addColorStop(1,    rgba(P.mid,  0));
+    ctx.fillStyle = core;
+    ctx.beginPath();
+    ctx.arc(L.x, L.y, coreR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function renderGodRays(L, polyPts, maxR) {
+    // For uniform angle sweep, cast ray and draw gradient line from light to hit
+    const N = SETTINGS.quality.godRays;
+    const intensity = L.intensity;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.lineCap = 'round';
+
+    for (let i = 0; i < N; i++) {
+      const angle = (i / N) * Math.PI * 2;
+      // Spot filter
+      if (L.type === 'spot') {
+        const da = ((angle - L.spotAngle + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+        if (Math.abs(da) > L.spotHalfRad) continue;
+      }
+      const hit = castSingleRay(L.x, L.y, angle, Math.min(maxR * 0.7, 1200));
+      const d = Math.sqrt((hit.x - L.x) ** 2 + (hit.y - L.y) ** 2);
+      if (d < 30) continue;
+      // Gradient line: bright at light, fading to hit
+      const grad = ctx.createLinearGradient(L.x, L.y, hit.x, hit.y);
+      grad.addColorStop(0,    rgba(P.mid,  0.22 * intensity));
+      grad.addColorStop(0.4,  rgba(P.edge, 0.12 * intensity));
+      grad.addColorStop(1,    rgba(P.edge, 0));
+      ctx.strokeStyle = grad;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(L.x, L.y);
+      ctx.lineTo(hit.x, hit.y);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // ============================================================
+  //  ADAPTIVE QUALITY
+  // ============================================================
+  function maybeAdaptQuality() {
+    if (!SETTINGS.quality.adaptive) return;
+    if (fpsHistory.length < 30) return;
+    const avg = fpsHistory.reduce((a, b) => a + b, 0) / fpsHistory.length;
+    if (avg < 25 && SETTINGS.fx.multiBounce.enabled) {
+      SETTINGS.fx.multiBounce.enabled = false;
+      saveSettings();
+      syncSettingsUI();
+    }
+  }
+
+  // ============================================================
+  //  SETTINGS UI WIRING
+  // ============================================================
+  function syncSettingsUI() {
+    // Lights
+    document.getElementById('light-1-type').value = SETTINGS.lights.L1.type;
+    document.getElementById('light-2-on').classList.toggle('on', SETTINGS.lights.L2.enabled);
+    document.getElementById('light-3-on').classList.toggle('on', SETTINGS.lights.L3.enabled);
+
+    // Effects
+    document.getElementById('fx-godrays').classList.toggle('on', SETTINGS.fx.godRays.enabled);
+    document.getElementById('fx-particles').classList.toggle('on', SETTINGS.fx.particles.enabled);
+    document.getElementById('fx-multibounce').classList.toggle('on', SETTINGS.fx.multiBounce.enabled);
+    document.getElementById('fx-colorbleed').classList.toggle('on', SETTINGS.fx.colorBleed.enabled);
+    document.getElementById('fx-penumbra').classList.toggle('on', SETTINGS.fx.penumbra.enabled);
+    document.getElementById('fx-specular').classList.toggle('on', SETTINGS.fx.specular.enabled);
+
+    // Quality
+    document.getElementById('q-penumbra').value = SETTINGS.quality.penumbraBlur;
+    document.getElementById('q-penumbra-v').textContent = SETTINGS.quality.penumbraBlur;
+    document.getElementById('q-rays').value = SETTINGS.quality.godRays;
+    document.getElementById('q-rays-v').textContent = SETTINGS.quality.godRays;
+    document.getElementById('q-particles').value = SETTINGS.quality.particles;
+    document.getElementById('q-particles-v').textContent = SETTINGS.quality.particles;
+    document.getElementById('q-gi').value = Math.round(SETTINGS.quality.giStrength * 100);
+    document.getElementById('q-gi-v').textContent = Math.round(SETTINGS.quality.giStrength * 100);
+    document.getElementById('q-adaptive').classList.toggle('on', SETTINGS.quality.adaptive);
+
+    // Lights indicator
+    const dots = document.querySelectorAll('.light-dot');
+    dots[0].classList.toggle('on', SETTINGS.lights.L1.enabled);
+    dots[0].className = 'light-dot on ' + (SETTINGS.lights.L1.type === 'spot' ? 'spot' : SETTINGS.lights.L1.type === 'directional' ? 'dir' : '');
+    dots[1].classList.toggle('on', SETTINGS.lights.L2.enabled);
+    dots[1].className = 'light-dot ' + (SETTINGS.lights.L2.enabled ? 'on ' : '') + (SETTINGS.lights.L2.type === 'spot' ? 'spot' : SETTINGS.lights.L2.type === 'directional' ? 'dir' : '');
+    dots[2].classList.toggle('on', SETTINGS.lights.L3.enabled);
+    dots[2].className = 'light-dot ' + (SETTINGS.lights.L3.enabled ? 'on ' : '') + (SETTINGS.lights.L3.type === 'spot' ? 'spot' : SETTINGS.lights.L3.type === 'directional' ? 'dir' : '');
+  }
+
+  function bindSetting(id, onChange) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('click', () => {
+      el.classList.toggle('on');
+      onChange(el.classList.contains('on'));
+      saveSettings();
+    });
+  }
+
+  function initSettingsUI() {
+    // Build palette swatches
+    const grid = document.getElementById('palette-grid');
+    grid.innerHTML = '';
+    for (let i = 0; i < PALETTES.length; i++) {
+      const sw = document.createElement('div');
+      sw.className = 'palette-swatch' + (i === SETTINGS.paletteId ? ' active' : '');
+      sw.dataset.num = (i + 1);
+      const p = PALETTES[i];
+      sw.style.background = 'linear-gradient(135deg, rgb(' + p.core + ') 0%, rgb(' + p.mid + ') 50%, rgb(' + p.edge + ') 100%)';
+      sw.title = p.name;
+      sw.addEventListener('click', () => setPalette(i));
+      grid.appendChild(sw);
+    }
+
+    // Light type selector
+    document.getElementById('light-1-type').addEventListener('change', (e) => {
+      SETTINGS.lights.L1.type = e.target.value;
+      lights[0].type = e.target.value;
+      saveSettings();
+      syncSettingsUI();
+    });
+
+    // Light toggles
+    bindSetting('light-2-on', (on) => {
+      SETTINGS.lights.L2.enabled = on;
+      lights[1].enabled = on;
+      syncSettingsUI();
+    });
+    bindSetting('light-3-on', (on) => {
+      SETTINGS.lights.L3.enabled = on;
+      lights[2].enabled = on;
+      syncSettingsUI();
+    });
+
+    // Effect toggles
+    bindSetting('fx-godrays',    (on) => { SETTINGS.fx.godRays.enabled = on; });
+    bindSetting('fx-particles',  (on) => { SETTINGS.fx.particles.enabled = on; });
+    bindSetting('fx-multibounce',(on) => { SETTINGS.fx.multiBounce.enabled = on; });
+    bindSetting('fx-colorbleed', (on) => { SETTINGS.fx.colorBleed.enabled = on; });
+    bindSetting('fx-penumbra',   (on) => { SETTINGS.fx.penumbra.enabled = on; });
+    bindSetting('fx-specular',   (on) => { SETTINGS.fx.specular.enabled = on; });
+    bindSetting('q-adaptive',    (on) => { SETTINGS.quality.adaptive = on; });
+
+    // Sliders
+    document.getElementById('q-penumbra').addEventListener('input', (e) => {
+      SETTINGS.quality.penumbraBlur = +e.target.value;
+      document.getElementById('q-penumbra-v').textContent = e.target.value;
+      saveSettings();
+    });
+    document.getElementById('q-rays').addEventListener('input', (e) => {
+      SETTINGS.quality.godRays = +e.target.value;
+      document.getElementById('q-rays-v').textContent = e.target.value;
+      saveSettings();
+    });
+    document.getElementById('q-particles').addEventListener('input', (e) => {
+      SETTINGS.quality.particles = +e.target.value;
+      document.getElementById('q-particles-v').textContent = e.target.value;
+      saveSettings();
+    });
+    document.getElementById('q-gi').addEventListener('input', (e) => {
+      SETTINGS.quality.giStrength = +e.target.value / 100;
+      document.getElementById('q-gi-v').textContent = e.target.value;
+      saveSettings();
+    });
+
+    // Close button
+    document.getElementById('settings-close').addEventListener('click', () => {
+      settingsEl.classList.remove('open');
+    });
+  }
+
+  // ============================================================
+  //  EVENTS
+  // ============================================================
+  function setLightTarget(x, y) {
+    lights[0].tx = x;
+    lights[0].ty = y;
+  }
+
+  window.addEventListener('mousemove', (e) => setLightTarget(e.clientX, e.clientY));
+
+  window.addEventListener('click', () => {
+    // Only treat as palette cycle if click was NOT on settings panel
+    if (settingsEl.classList.contains('open')) {
+      // Check if click target is inside settings
+      return;
+    }
+    setPalette(SETTINGS.paletteId + 1);
+  });
+
+  window.addEventListener('keydown', (e) => {
+    const key = e.key;
+    if (key === 's' || key === 'S') {
+      e.preventDefault();
+      settingsEl.classList.toggle('open');
+    } else if (key === 'Escape') {
+      settingsEl.classList.remove('open');
+    } else if (key === 'r' || key === 'R') {
+      regenerateMaze();
+    } else if (key === 'g' || key === 'G') {
+      SETTINGS.fx.godRays.enabled = !SETTINGS.fx.godRays.enabled;
+      saveSettings(); syncSettingsUI();
+    } else if (key === 'b' || key === 'B') {
+      SETTINGS.fx.particles.enabled = !SETTINGS.fx.particles.enabled;
+      saveSettings(); syncSettingsUI();
+    } else if (key === 'm' || key === 'M') {
+      SETTINGS.fx.multiBounce.enabled = !SETTINGS.fx.multiBounce.enabled;
+      saveSettings(); syncSettingsUI();
+    } else if (key === 'l' || key === 'L') {
+      // Toggle L2 first if disabled, else L3
+      if (!SETTINGS.lights.L2.enabled) {
+        SETTINGS.lights.L2.enabled = true;
+        lights[1].enabled = true;
+      } else if (!SETTINGS.lights.L3.enabled) {
+        SETTINGS.lights.L3.enabled = true;
+        lights[2].enabled = true;
+      } else {
+        SETTINGS.lights.L2.enabled = false;
+        SETTINGS.lights.L3.enabled = false;
+        lights[1].enabled = false;
+        lights[2].enabled = false;
+      }
+      saveSettings(); syncSettingsUI();
+    } else if (/^[0-9]$/.test(key) || key === '-' || key === '=') {
+      const map = { '0': 9, '-': 10, '=': 11 };
+      const idx = map[key] !== undefined ? map[key] : parseInt(key, 10) - 1;
+      if (idx >= 0 && idx < PALETTES.length) setPalette(idx);
+    }
+  });
+
+  window.addEventListener('touchmove', (e) => {
+    const t = e.touches[0];
+    if (t) setLightTarget(t.clientX, t.clientY);
+  }, { passive: true });
+  window.addEventListener('touchstart', (e) => {
+    const t = e.touches[0];
+    if (t) setLightTarget(t.clientX, t.clientY);
+  }, { passive: true });
+  window.addEventListener('resize', resize);
+
+  // ============================================================
+  //  INIT
+  // ============================================================
+  resize();
+  initParticles();
+  lights[0].x = lights[0].tx = W * 0.5;
+  lights[0].y = lights[0].ty = H * 0.5;
+  lights[1].x = lights[1].tx = W * 0.78;
+  lights[1].y = lights[1].ty = H * 0.32;
+  lights[2].x = lights[2].tx = W * 0.22;
+  lights[2].y = lights[2].ty = H * 0.78;
+  // Apply loaded settings to runtime state
+  lights[0].type = SETTINGS.lights.L1.type;
+  lights[0].intensity = SETTINGS.lights.L1.intensity;
+  lights[1].enabled = SETTINGS.lights.L2.enabled;
+  lights[1].intensity = SETTINGS.lights.L2.intensity;
+  lights[1].type = SETTINGS.lights.L2.type;
+  lights[2].enabled = SETTINGS.lights.L3.enabled;
+  lights[2].intensity = SETTINGS.lights.L3.intensity;
+  lights[2].type = SETTINGS.lights.L3.type;
+
+  initSettingsUI();
+  syncSettingsUI();
+  setPalette(SETTINGS.paletteId, true);  // instant
+  // requestAnimationFrame(render); -- old single-shot
+  function loop(now) {
+    render(now);
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+  // Adaptive quality check every 2 seconds
+  setInterval(maybeAdaptQuality, 2000);
+})();
+</script>
 </body>
 </html>

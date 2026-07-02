@@ -1,0 +1,15 @@
+# Agent workspace (Sisyphus runtime artifacts, plans, notepads)
+.omo/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*~
+
+# Local server / build artifacts
+node_modules/
+dist/
+build/
+.cache/

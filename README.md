@@ -10,12 +10,12 @@
 
 | 항목 | 값 |
 |------|-----|
-| **Live URL** | https://ray-cast-shadows.vercel.app |
+| **Live URL** | https://sigco3111.github.io/ray-cast-shadows |
 | **상태** | 🟢 Production |
 | **렌더링** | 단일 HTML, 외부 의존성 0 |
 | **반응형** | viewport 자동 맞춤, 모바일 터치 지원 |
 
-[![Live Demo](https://img.shields.io/badge/Vercel-Live%20Demo-black?style=for-the-badge&logo=vercel)](https://ray-cast-shadows.vercel.app)
+[![Live Demo](https://img.shields.io/badge/Vercel-Live%20Demo-black?style=for-the-badge&logo=vercel)](https://sigco3111.github.io/ray-cast-shadows)
 
 **빠른 사용법**: 페이지 열기 → 마우스로 광원 이동 → 클릭으로 색상 변경 → 미로 사이로 빛이 퍼짐
 
@@ -53,7 +53,7 @@
 ## 🚀 사용법 (Usage)
 
 ### 라이브 데모
-👉 https://ray-cast-shadows.vercel.app 에서 바로 실행
+👉 https://sigco3111.github.io/ray-cast-shadows 에서 바로 실행
 
 ### 로컬 실행
 
@@ -143,7 +143,7 @@ function castRays(lightPos, walls) {
 
 > A **mouse-driven light source** casting **dynamic ray-casting shadows** through procedurally-generated maze walls, with **click-to-cycle colors** and a soft **global illumination** glow — generative art in HTML5 Canvas.
 
-- **Live Demo**: https://ray-cast-shadows.vercel.app
+- **Live Demo**: https://sigco3111.github.io/ray-cast-shadows
 - **Algorithm**: Ray casting (angles to wall endpoints) + polygon fill + radial gradient overlay
 - **Tech**: HTML5 Canvas, Vanilla JS, zero dependencies
 - **License**: MIT

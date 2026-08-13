@@ -15,7 +15,7 @@
 | **렌더링** | 단일 HTML, 외부 의존성 0 |
 | **반응형** | viewport 자동 맞춤, 모바일 터치 지원 |
 
-[![Live Demo](https://img.shields.io/badge/Vercel-Live%20Demo-black?style=for-the-badge&logo=vercel)](https://sigco3111.github.io/ray-cast-shadows)
+[![Live Demo](https://img.shields.io/badge/GitHub%20Pages-Live%20Demo-222222?style=for-the-badge&logo=githubpages)](https://sigco3111.github.io/ray-cast-shadows)
 
 **빠른 사용법**: 페이지 열기 → 마우스로 광원 이동 → 클릭으로 색상 변경 → 미로 사이로 빛이 퍼짐
 
@@ -89,7 +89,7 @@ python3 -m http.server 8000
 | 언어 | Vanilla JavaScript (ES6+) |
 | 스타일 | CSS3 (Custom Properties + Filter effects) |
 | 빌드 | 없음 (zero-deps) |
-| 호스팅 | Vercel (정적 사이트) |
+| 호스팅 | GitHub Pages (정적 사이트) |
 
 ### 알고리즘 요약
 
@@ -162,7 +162,7 @@ MIT License — 자유롭게 사용, 수정, 배포 가능
 - **글로벌 일루미네이션** — 다중 패스 + radial gradient 근사
 - **미로 절차적 생성** — 시드 가능한 난수 + 다중 폴리곤
 - **OpenCode + MiniMax-M3** — AI 협업 부트스트랩
-- **Vercel** — 정적 사이트 호스팅
+- **GitHub Pages** — 정적 사이트 호스팅
 - 코딩미션 참조 페이지: [cokac.com](https://cokac.com/list/announcement/24)
 
 ---
